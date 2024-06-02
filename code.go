@@ -170,6 +170,12 @@ const (
 )
 
 func (o opcode) String() string {
+	if o == opInf {
+		return "infinity"
+	}
+	if o == 0 {
+		return "rev infinity"
+	}
 	rev := ""
 	if o&0x80 != 0 {
 		rev = "rev "
@@ -188,8 +194,6 @@ func (o opcode) String() string {
 		return rev + "float64"
 	case opInt:
 		return rev + "int"
-	case opInf:
-		return rev + "infinity"
 	}
 	return fmt.Sprintf("opcode(%#x)", uint8(o))
 }
@@ -352,11 +356,11 @@ func Append(enc []byte, list ...any) []byte {
 		case string:
 			enc = appendString(enc, x, 0)
 		case Reverse[string]:
-			enc = appendString(enc, x.v, rev)
+			enc = appendString(enc, x.Value(), rev)
 		case []byte:
 			enc = appendBytes(enc, x, 0)
 		case Reverse[[]byte]:
-			enc = appendBytes(enc, x.v, rev)
+			enc = appendBytes(enc, x.Value(), rev)
 		case Infinity:
 			enc = append(enc, byte(opInf))
 		case Reverse[Infinity]:
@@ -368,10 +372,10 @@ func Append(enc []byte, list ...any) []byte {
 				enc = appendString(enc, x.S, 0)
 			}
 		case Reverse[StringOrInfinity]:
-			if x.v.Inf {
+			if x.Value().Inf {
 				enc = append(enc, byte(opInf)^rev)
 			} else {
-				enc = appendString(enc, x.v.S, rev)
+				enc = appendString(enc, x.Value().S, rev)
 			}
 		case uintptr:
 			enc = appendUint64(enc, uint64(x), 0)
@@ -386,17 +390,17 @@ func Append(enc []byte, list ...any) []byte {
 		case uint:
 			enc = appendUint64(enc, uint64(x), 0)
 		case Reverse[uintptr]:
-			enc = appendUint64(enc, uint64(x.v), rev)
+			enc = appendUint64(enc, uint64(x.Value()), rev)
 		case Reverse[uint64]:
-			enc = appendUint64(enc, uint64(x.v), rev)
+			enc = appendUint64(enc, uint64(x.Value()), rev)
 		case Reverse[uint32]:
-			enc = appendUint64(enc, uint64(x.v), rev)
+			enc = appendUint64(enc, uint64(x.Value()), rev)
 		case Reverse[uint16]:
-			enc = appendUint64(enc, uint64(x.v), rev)
+			enc = appendUint64(enc, uint64(x.Value()), rev)
 		case Reverse[uint8]:
-			enc = appendUint64(enc, uint64(x.v), rev)
+			enc = appendUint64(enc, uint64(x.Value()), rev)
 		case Reverse[uint]:
-			enc = appendUint64(enc, uint64(x.v), rev)
+			enc = appendUint64(enc, uint64(x.Value()), rev)
 		case int64:
 			enc = appendInt64(enc, x, 0)
 		case int32:
@@ -408,30 +412,26 @@ func Append(enc []byte, list ...any) []byte {
 		case int:
 			enc = appendInt64(enc, int64(x), 0)
 		case Reverse[int64]:
-			enc = appendInt64(enc, int64(x.v), rev)
+			enc = appendInt64(enc, int64(x.Value()), rev)
 		case Reverse[int32]:
-			enc = appendInt64(enc, int64(x.v), rev)
+			enc = appendInt64(enc, int64(x.Value()), rev)
 		case Reverse[int16]:
-			enc = appendInt64(enc, int64(x.v), rev)
+			enc = appendInt64(enc, int64(x.Value()), rev)
 		case Reverse[int8]:
-			enc = appendInt64(enc, int64(x.v), rev)
+			enc = appendInt64(enc, int64(x.Value()), rev)
 		case Reverse[int]:
-			enc = appendInt64(enc, int64(x.v), rev)
+			enc = appendInt64(enc, int64(x.Value()), rev)
 		case float64:
 			enc = appendFloat64(enc, x, 0)
 		case float32:
 			enc = appendFloat32(enc, x, 0)
 		case Reverse[float64]:
-			enc = appendFloat64(enc, x.v, rev)
+			enc = appendFloat64(enc, x.Value(), rev)
 		case Reverse[float32]:
-			enc = appendFloat32(enc, x.v, rev)
+			enc = appendFloat32(enc, x.Value(), rev)
 		}
 	}
 	return enc
-}
-
-func appendInfinity(out []byte, rev byte) []byte {
-	return append(out, byte(opInf)^rev)
 }
 
 func appendString(out []byte, x string, rev byte) []byte {
@@ -566,9 +566,9 @@ var (
 // after decoding values into each element of list.
 // To decode only a prefix of the encoding, use [DecodePrefix].
 func Decode(enc []byte, list ...any) error {
-	enc, err := DecodePrefix(enc, list)
+	enc, err := DecodePrefix(enc, list...)
 	if err != nil {
-		return nil
+		return err
 	}
 	if len(enc) > 0 {
 		return errExtra
@@ -633,6 +633,7 @@ Outer:
 	case *any:
 		switch op {
 		default:
+			// unreachable missing case
 			break Outer
 		case opString:
 			*x = string(b)
@@ -949,6 +950,7 @@ Outer:
 		rev ^ (opInt + opPosInt + 6),
 		rev ^ (opInt + opPosInt + 7),
 		rev ^ opInf:
+		// unreachable missing case: don't say errCorrupt
 		return nil, fmt.Errorf("cannot parse %s into %T", op, x)
 	}
 	return nil, errCorrupt
@@ -992,11 +994,11 @@ func decodeNext(enc []byte) (op opcode, b []byte, u uint64, iok int, f float64, 
 		for i := 0; i < len(enc); i++ {
 			if enc[i] == 0x00 {
 				b = append(b, enc[start:i]...)
-				if i+1 >= len(enc) {
-					err = errCorrupt
-					return
-				}
-				if enc[i+1] != 0xFF {
+				// Note: i+1 >= len(enc) is impossible,
+				// because we cut enc at the first 00 00,
+				// so enc cannot end in 00.
+				// But check bounds anyway in case that changes.
+				if i+1 >= len(enc) || enc[i+1] != 0xFF {
 					err = errCorrupt
 					return
 				}
@@ -1016,11 +1018,11 @@ func decodeNext(enc []byte) (op opcode, b []byte, u uint64, iok int, f float64, 
 		enc, rest = enc[:i], enc[i+len(endString):]
 		for i := 0; i < len(enc); i++ {
 			if enc[i] == 0x00^0xFF {
-				if i+1 >= len(enc) {
-					err = errCorrupt
-					return
-				}
-				if enc[i+1] != 0xFF^0xFF {
+				// Note: i+1 >= len(enc) is impossible,
+				// because we cut enc at the first FF FF,
+				// so enc cannot end in FF.
+				// But check bounds anyway in case that changes.
+				if i+1 >= len(enc) || enc[i+1] != 0xFF^0xFF {
 					err = errCorrupt
 					return
 				}
@@ -1053,6 +1055,10 @@ func decodeNext(enc []byte) (op opcode, b []byte, u uint64, iok int, f float64, 
 			return
 		}
 		enc, rest = enc[:n], enc[n:]
+		if len(enc) > 1 && (pos && enc[0]^d == 0 || !pos && enc[0]^d == 0xff) {
+			err = errCorrupt
+			return
+		}
 		for _, x := range enc {
 			u = u<<8 | uint64(x^d)
 		}
@@ -1099,7 +1105,6 @@ func decodeNext(enc []byte) (op opcode, b []byte, u uint64, iok int, f float64, 
 		u ^= 1 << 31
 		u ^= uint32(int32(u)>>31) >> 1
 		f = float64(math.Float32frombits(u))
-
 	}
 	return
 }
