@@ -339,6 +339,7 @@ var golden = []struct {
 	{StringOrInfinity{S: "x"}, "\x01x\x00\x00"},
 	{StringOrInfinity{}, "\x01\x00\x00"},
 	{StringOrInfinity{Inf: true}, "\xff"},
+	{Raw("hello\x00world"), "\x04\x0bhello\x00world"},
 }
 
 func TestGolden(t *testing.T) {
@@ -371,28 +372,30 @@ func TestGolden(t *testing.T) {
 			continue
 		}
 
-		// Reverse
-		rev := RevAny(tt.x)
-		enc = Encode(rev)
-		want := []byte(tt.enc)
-		for i, x := range want {
-			want[i] = ^x
-		}
-		if string(enc) != string(want) {
-			t.Errorf("Encode(Rev(%T(%s))) = %q (%x), want %q (%x)", tt.x, desc, enc, enc, want, want)
-			continue
-		}
+		if _, ok := tt.x.(Raw); !ok {
+			// Reverse.
+			rev := RevAny(tt.x)
+			enc = Encode(rev)
+			want := []byte(tt.enc)
+			for i, x := range want {
+				want[i] = ^x
+			}
+			if string(enc) != string(want) {
+				t.Errorf("Encode(Rev(%T(%s))) = %q (%x), want %q (%x)", tt.x, desc, enc, enc, want, want)
+				continue
+			}
 
-		// Typed Decode
-		ptr = reflect.New(reflect.TypeOf(rev)).Interface()
-		err = Decode(enc, ptr)
-		if err != nil {
-			t.Errorf("Decode(Encode(%s), %T): %v", desc, ptr, err)
-			continue
-		}
-		if v := reflect.ValueOf(ptr).Elem().Interface(); !equal(v, rev) {
-			t.Errorf("Decode(Encode(%s), %T) = %v, want %v", desc, ptr, format(v), format(rev))
-			continue
+			// Typed Decode
+			ptr = reflect.New(reflect.TypeOf(rev)).Interface()
+			err = Decode(enc, ptr)
+			if err != nil {
+				t.Errorf("Decode(Encode(%s), %T): %v", desc, ptr, err)
+				continue
+			}
+			if v := reflect.ValueOf(ptr).Elem().Interface(); !equal(v, rev) {
+				t.Errorf("Decode(Encode(%s), %T) = %v, want %v", desc, ptr, format(v), format(rev))
+				continue
+			}
 		}
 
 		// Try all possible shorter encodings and check that they return errors.
@@ -466,6 +469,7 @@ func TestOpcodeString(t *testing.T) {
 		{opString, "string"},
 		{opFloat32, "float32"},
 		{opFloat64, "float64"},
+		{opRaw, "raw"},
 		{opInt | opPosInt, "int"},
 		{opInt, "int"},
 		{opInf, "infinity"},
@@ -498,7 +502,7 @@ var corruptTests = []string{
 	"\x27\x7f\x00\x00\x00\x00\x00\x00\x00\x00",
 	"\x02\x00\x00\x00",
 	"\x03\x00\x00\x00\x00\x00\x00\x00",
-	"\x04",
+	"\x20",
 }
 
 var corruptTypedTests = []struct {
@@ -582,6 +586,7 @@ var canEncodeTests = []any{
 	uint64(1),
 	float32(1),
 	float64(1),
+	Raw("hello"),
 }
 
 var canEncodeFalse = []any{
@@ -590,6 +595,9 @@ var canEncodeFalse = []any{
 
 func init() {
 	for _, x := range canEncodeTests {
+		if _, ok := x.(Raw); ok {
+			return
+		}
 		canEncodeTests = append(canEncodeTests, RevAny(x))
 	}
 }
@@ -629,4 +637,41 @@ func TestPanics(t *testing.T) {
 		Append(nil, 1i)
 		t.Errorf("Append did not panic")
 	}()
+}
+
+var decodeFmtTests = []struct {
+	enc []byte
+	s   string
+}{
+	{Encode(1, 2, uint64(1e19)), "(1, 2, 10000000000000000000)"},
+	{Encode(float32(1.0), math.NaN()), "(float32(1), float64(NaN))"},
+	{Encode("hello"), "(\"hello\")"},
+	{Encode(Inf), "(Inf)"},
+	{Encode(Rev(1), Rev(2), Rev(uint64(1e19))), "(Rev(1), Rev(2), Rev(10000000000000000000))"},
+	{Encode(Rev(float32(1.0)), Rev(math.Inf(+1))), "(Rev(float32(1)), Rev(float64(+Inf)))"},
+	{Encode(Rev("hello")), "(Rev(\"hello\"))"},
+	{Encode(Rev(Inf)), "(Rev(Inf))"},
+	{Encode(Raw("hello")), "(Raw(\"hello\"))"},
+}
+
+func TestDecodeFmt(t *testing.T) {
+	for _, tt := range decodeFmtTests {
+		s, err := DecodeFmt(tt.enc)
+		if s != tt.s || err != nil {
+			t.Errorf("DecodeFmt(%x) = %q, %v, want %q, nil", tt.enc, s, err, tt.s)
+		}
+	}
+
+	if _, err := DecodeFmt([]byte("\x20")); err == nil {
+		t.Errorf("DecodeFmt(04) success, want error")
+	}
+}
+
+func TestDecodeNil(t *testing.T) {
+	enc := Encode(1, 2, 3)
+	var x int
+	err := Decode(enc, nil, nil, &x)
+	if err != nil || x != 3 {
+		t.Errorf("Decode(enc, nil, nil, &x) = %v, x=%d; want nil, x=3", err, x)
+	}
 }

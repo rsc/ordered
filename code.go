@@ -68,6 +68,18 @@ For x of type T, [Rev](x) returns a Reverse[T] holding the value x.
 
 Given x and y of type T, bytes.Compare(E([Rev(x)]), E([Rev(y)])) = cmp.Compare(y, x).
 
+# Raw Data
+
+It can be useful and efficient to store a large []byte as itself at the end
+of an encoding. The type [Raw] represents such a sequence.
+It is encoded with a length prefix, so that shorter values are ordered
+before longer ones, and values of the same length are ordered
+to match bytes.Compare.
+When decoding, the extracted values of type []byte are copies of the
+original slice, not pointers into the original.
+Raw is an exception: decoding a [Raw] returns a slice overlapping
+the original encoded input.
+
 # Encodings
 
 This package only supports encoding a limited number of types.
@@ -129,12 +141,15 @@ The types and their encodings are:
   - [Reverse][T]: The encoding of [Rev](x) is the encoding of x with all
     bits negated (equivalently, all bytes XOR'ed with 0xFF).
 
+  - [Raw]: The encoding is a 0x04 byte followed by the raw bytes.
+    The content is the remainder of the encoded data.
+
 # Type Ordering
 
 Code should in general not depend on the relative ordering of values of different types,
 but the order is:
-string/[]byte < float32 < float64 < integer < Infinity <
-Reverse[Infinity] < Reverse[integer] < Reverse[float64] < Reverse[float32] < Reverse[string/[]byte].
+Reverse[Infinity] < string/[]byte < float32 < float64 < Raw < integer <
+Reverse[integer] < Reverse[float64] < Reverse[float32] < Reverse[string/[]byte] < Infinity.
 
 # Compatibility
 
@@ -163,6 +178,7 @@ const (
 	opString  opcode = 0x01
 	opFloat32 opcode = 0x02
 	opFloat64 opcode = 0x03
+	opRaw     opcode = 0x04
 	opInt     opcode = 0x20
 	opPosInt  opcode = 0x10 // bit indicating positive for opInt
 	opInf     opcode = 0xFF
@@ -192,6 +208,8 @@ func (o opcode) String() string {
 		return rev + "float32"
 	case opFloat64:
 		return rev + "float64"
+	case opRaw:
+		return rev + "raw"
 	case opInt:
 		return rev + "int"
 	}
@@ -229,6 +247,11 @@ type Reversible interface {
 type Reverse[T Reversible] struct {
 	v T
 }
+
+// Raw is a []byte that encodes as itself, with only a type prefix added.
+// When decoding into a Raw, the Raw is a subslice of the original encoded input,
+// not a copy.
+type Raw []byte
 
 // Value returns the value x for which r == Rev(x).
 func (r Reverse[T]) Value() T {
@@ -324,7 +347,8 @@ func CanEncode(list ...any) bool {
 			Reverse[uint32],
 			Reverse[uint64],
 			Reverse[float32],
-			Reverse[float64]:
+			Reverse[float64],
+			Raw:
 			continue
 		}
 	}
@@ -429,6 +453,10 @@ func Append(enc []byte, list ...any) []byte {
 			enc = appendFloat64(enc, x.Value(), rev)
 		case Reverse[float32]:
 			enc = appendFloat32(enc, x.Value(), rev)
+		case Raw:
+			enc = append(enc, byte(opRaw))
+			enc = binary.AppendUvarint(enc, uint64(len(x)))
+			enc = append(enc, x...)
 		}
 	}
 	return enc
@@ -604,7 +632,8 @@ func DecodePrefix(enc []byte, list ...any) (rest []byte, err error) {
 //   - uint64, for other very large integer values
 //   - float32
 //   - float64
-//   - Reverse[T] for a type earlier in this list.
+//   - Reverse[T] for a type earlier in this list
+//   - Raw for a raw byte slice.
 func DecodeAny(enc []byte) ([]any, error) {
 	var out []any
 	for len(enc) > 0 {
@@ -630,6 +659,8 @@ Outer:
 	switch x := x.(type) {
 	default:
 		return nil, fmt.Errorf("ordered: invalid type %T", x)
+	case nil:
+		return enc, nil
 	case *any:
 		switch op {
 		default:
@@ -663,6 +694,8 @@ Outer:
 			*x = Rev(float32(f))
 		case opFloat64 ^ rev:
 			*x = Rev(f)
+		case opRaw:
+			*x = Raw(b)
 		}
 		return enc, nil
 	case *string:
@@ -677,6 +710,11 @@ Outer:
 		}
 	case *[]byte:
 		if op == opString {
+			*x = b
+			return enc, nil
+		}
+	case *Raw:
+		if op == opRaw {
 			*x = b
 			return enc, nil
 		}
@@ -1033,6 +1071,14 @@ func decodeNext(enc []byte) (op opcode, b []byte, u uint64, iok int, f float64, 
 			}
 		}
 
+	case opRaw:
+		n, w := binary.Uvarint(enc)
+		if w <= 0 || n > uint64(len(enc)-w) {
+			err = errCorrupt
+			return
+		}
+		b, rest = enc[w:w+int(n)], enc[w+int(n):]
+
 	case opInt, opInt ^ rev:
 		d := byte(0)
 		if op == opInt^rev {
@@ -1107,4 +1153,68 @@ func decodeNext(enc []byte) (op opcode, b []byte, u uint64, iok int, f float64, 
 		f = float64(math.Float32frombits(u))
 	}
 	return
+}
+
+// DecodeFmt decodes enc into a parenthesized, comma-separated list of textual values.
+// Each value in the list will have one of the following formats:
+//
+//   - double-quoted string, for both string and []byte values
+//   - "Inf", for Infinity
+//   - decimal or negative decimal, for integer values.
+//   - "float32(f)" for float32 values; f may be NaN or +Inf or -Inf
+//   - "float64(f)" for float64 values; f may be NaN or +Inf or -Inf
+//   - "Rev(x)" for a reverse of formatted value x earlier in this list
+//   - "Raw(q)", where q is a double-quoted string, for a Raw value.
+func DecodeFmt(enc []byte) (string, error) {
+	list, err := DecodeAny(enc)
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "(")
+	for i, x := range list {
+		if i > 0 {
+			fmt.Fprintf(&buf, ", ")
+		}
+		var rx any
+		switch x := x.(type) {
+		case Reverse[string]:
+			rx = x.Value()
+		case Reverse[Infinity]:
+			rx = x.Value()
+		case Reverse[int64]:
+			rx = x.Value()
+		case Reverse[uint64]:
+			rx = x.Value()
+		case Reverse[float32]:
+			rx = x.Value()
+		case Reverse[float64]:
+			rx = x.Value()
+		}
+		end := ""
+		if rx != nil {
+			fmt.Fprintf(&buf, "Rev(")
+			end = ")"
+			x = rx
+		}
+		switch x := x.(type) {
+		case string:
+			fmt.Fprintf(&buf, "%q", x)
+		case Raw:
+			fmt.Fprintf(&buf, "Raw(%q)", []byte(x))
+		case Infinity:
+			fmt.Fprintf(&buf, "Inf")
+		case int64:
+			fmt.Fprintf(&buf, "%d", x)
+		case uint64:
+			fmt.Fprintf(&buf, "%d", x)
+		case float32:
+			fmt.Fprintf(&buf, "float32(%v)", x)
+		case float64:
+			fmt.Fprintf(&buf, "float64(%v)", x)
+		}
+		fmt.Fprintf(&buf, "%s", end)
+	}
+	fmt.Fprintf(&buf, ")")
+	return buf.String(), nil
 }
