@@ -154,7 +154,7 @@ Reverse[integer] < Reverse[float64] < Reverse[float32] < Reverse[string/[]byte] 
 # Compatibility
 
 Because the encodings are expected to be used as keys and values
-in storage systems, existing encodings will not changed in future versions.
+in storage systems, existing encodings will not be changed in future versions.
 New types may be introduced.
 
 Although this package is inspired by [github.com/google/orderedcode],
