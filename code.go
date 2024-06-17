@@ -269,7 +269,8 @@ func Rev[T Reversible](x T) Reverse[T] {
 func RevAny(x any) any {
 	switch x := x.(type) {
 	default:
-		panic(fmt.Sprintf("ordered: invalid type %T", x))
+		t := reflect.TypeOf(x)
+		panic(fmt.Sprintf("ordered: invalid type %s", t))
 	case string:
 		return Rev(x)
 	case []byte:
@@ -660,7 +661,8 @@ func decode(enc []byte, x any) ([]byte, error) {
 Outer:
 	switch x := x.(type) {
 	default:
-		return nil, fmt.Errorf("ordered: invalid type %T", x)
+		t := reflect.TypeOf(x)
+		return nil, fmt.Errorf("ordered: invalid type %s", t)
 	case nil:
 		return enc, nil
 	case *any:
@@ -991,7 +993,8 @@ Outer:
 		rev ^ (opInt + opPosInt + 7),
 		rev ^ opInf:
 		// unreachable missing case: don't say errCorrupt
-		return nil, fmt.Errorf("cannot parse %s into %T", op, x)
+		t := reflect.TypeOf(x)
+		return nil, fmt.Errorf("cannot parse %s into %s", op, t)
 	}
 	return nil, errCorrupt
 }

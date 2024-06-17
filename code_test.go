@@ -691,3 +691,23 @@ func BenchmarkAppend(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkDecode(b *testing.B) {
+	b.Run("Simple", func(b *testing.B) {
+		b.ReportAllocs()
+		enc := Encode(1, 2, 256, 1.61, "abc")
+
+		for i := 0; i < b.N; i++ {
+			var (
+				i1, i2 int
+				u      uint64
+				f      float64
+				s      string
+			)
+			err := Decode(enc, &i1, &i2, &u, &f, &s)
+			if err != nil {
+				b.Fatalf("Decode: %v", err)
+			}
+		}
+	})
+}
