@@ -675,3 +675,39 @@ func TestDecodeNil(t *testing.T) {
 		t.Errorf("Decode(enc, nil, nil, &x) = %v, x=%d; want nil, x=3", err, x)
 	}
 }
+
+func BenchmarkAppend(b *testing.B) {
+	b.Run("Simple", func(b *testing.B) {
+		b.ReportAllocs()
+		buf := make([]byte, 256)
+		for i := 0; i < b.N; i++ {
+			var (
+				i1, i2 int     = 1, 2
+				u      uint64  = 256
+				f      float64 = 1.61
+				s              = "abc"
+			)
+			Append(buf[:0], i1, i2, i2, i2, u, u, u, f, s)
+		}
+	})
+}
+
+func BenchmarkDecode(b *testing.B) {
+	b.Run("Simple", func(b *testing.B) {
+		b.ReportAllocs()
+		enc := Encode(1, 2, 256, 1.61, "abc")
+
+		for i := 0; i < b.N; i++ {
+			var (
+				i1, i2 int
+				u      uint64
+				f      float64
+				s      string
+			)
+			err := Decode(enc, &i1, &i2, &u, &f, &s)
+			if err != nil {
+				b.Fatalf("Decode: %v", err)
+			}
+		}
+	})
+}
