@@ -169,6 +169,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"reflect"
 )
 
 // opcode is the type byte for an encoded value.
@@ -376,7 +377,8 @@ func Append(enc []byte, list ...any) []byte {
 	for _, x := range list {
 		switch x := x.(type) {
 		default:
-			panic(fmt.Sprintf("ordered: invalid type %T", x))
+			t := reflect.TypeOf(x)
+			panic(fmt.Sprintf("ordered: invalid type %s", t))
 		case string:
 			enc = appendString(enc, x, 0)
 		case Reverse[string]:
