@@ -154,7 +154,7 @@ Reverse[integer] < Reverse[float64] < Reverse[float32] < Reverse[string/[]byte] 
 # Compatibility
 
 Because the encodings are expected to be used as keys and values
-in storage systems, existing encodings will not changed in future versions.
+in storage systems, existing encodings will not be changed in future versions.
 New types may be introduced.
 
 Although this package is inspired by [github.com/google/orderedcode],
@@ -169,6 +169,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"reflect"
 )
 
 // opcode is the type byte for an encoded value.
@@ -268,7 +269,8 @@ func Rev[T Reversible](x T) Reverse[T] {
 func RevAny(x any) any {
 	switch x := x.(type) {
 	default:
-		panic(fmt.Sprintf("ordered: invalid type %T", x))
+		t := reflect.TypeOf(x)
+		panic(fmt.Sprintf("ordered: invalid type %s", t))
 	case string:
 		return Rev(x)
 	case []byte:
@@ -376,7 +378,8 @@ func Append(enc []byte, list ...any) []byte {
 	for _, x := range list {
 		switch x := x.(type) {
 		default:
-			panic(fmt.Sprintf("ordered: invalid type %T", x))
+			t := reflect.TypeOf(x)
+			panic(fmt.Sprintf("ordered: invalid type %s", t))
 		case string:
 			enc = appendString(enc, x, 0)
 		case Reverse[string]:
@@ -662,7 +665,8 @@ func decode(enc []byte, x any) ([]byte, error) {
 Outer:
 	switch x := x.(type) {
 	default:
-		return nil, fmt.Errorf("ordered: invalid type %T", x)
+		t := reflect.TypeOf(x)
+		return nil, fmt.Errorf("ordered: invalid type %s", t)
 	case nil:
 		return enc, nil
 	case *any:
@@ -993,7 +997,8 @@ Outer:
 		rev ^ (opInt + opPosInt + 7),
 		rev ^ opInf:
 		// unreachable missing case: don't say errCorrupt
-		return nil, fmt.Errorf("cannot parse %s into %T", op, x)
+		t := reflect.TypeOf(x)
+		return nil, fmt.Errorf("cannot parse %s into %s", op, t)
 	}
 	return nil, errCorrupt
 }
