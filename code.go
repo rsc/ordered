@@ -585,10 +585,12 @@ var (
 // Decode decodes enc into a list of typed values.
 //
 // Each value in list must be a non-nil pointer to an encodable type
-// (see [CanEncode]) or else be a non-nil *any.
+// (see [CanEncode]) or else be a non-nil *any
+// or else be a nil any.
 // When decoding into a *any, the existing value in the any
 // is ignored and replaced with one of the types listed in
 // the documentation for [DecodeAny].
+// Decoding into a nil any discards the corresponding value.
 //
 // Decode checks that there is no encoded data remaining
 // after decoding values into each element of list.
@@ -608,10 +610,12 @@ func Decode(enc []byte, list ...any) error {
 // returning the rest of the encoding and any error encountered.
 //
 // Each value in list must be a non-nil pointer to an encodable type
-// (see [CanEncode]) or else be a non-nil *any.
+// (see [CanEncode]) or else be a non-nil *any
+// or else be a nil any.
 // When decoding into a *any, the existing value in the any
 // is ignored and replaced with one of the types listed in
 // the documentation for [DecodeAny].
+// Decoding into a nil any discards the corresponding value.
 func DecodePrefix(enc []byte, list ...any) (rest []byte, err error) {
 	for _, x := range list {
 		var err error
