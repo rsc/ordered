@@ -100,7 +100,7 @@ The types and their encodings are:
     to least significant.
 
     For example, the encoding of 0x12345 is "\x32\x01\x23\x45",
-    the encoding of 1 is "\x30\x01", and the encoding of 0 is "\x31\x00".
+    the encoding of 1 is "\x30\x01", and the encoding of 0 is "\x30\x00".
 
     The encoding of a negative integer x is a byte 0x30-n for n in 1..8
     where n is the number of significant low bytes of ^x = -(x+1).
@@ -122,7 +122,7 @@ The types and their encodings are:
     Otherwise, u is math.Float32bits(f) with the top (sign) bit always
     inverted and the remaining bits inverted when f < 0.
 
-  - float64: The encoding of a float32 f is a 0x03 byte followed by
+  - float64: The encoding of a float64 f is a 0x03 byte followed by
     a big-endian uint64 u representing f.
     If f is a NaN, then u = 0.
     Otherwise, u is math.Float64bits(f) with the top (sign) bit always
